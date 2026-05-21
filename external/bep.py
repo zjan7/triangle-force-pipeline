@@ -57,7 +57,6 @@ def solve_module(force_vec, upside_down):
 
     return (c1, c2, c3)
 
-
 def main():
     print("test")
 

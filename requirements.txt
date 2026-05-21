@@ -3,4 +3,8 @@ pandas
 matplotlib
 opencv-contrib-python
 scipy
+jax
+beartype
+jaxtyping
+optimistix
 tqdm
