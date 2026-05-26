@@ -1,0 +1,10 @@
+﻿numpy
+pandas
+matplotlib
+opencv-contrib-python
+scipy
+tqdm
+jax
+beartype
+jaxtyping
+optimistix

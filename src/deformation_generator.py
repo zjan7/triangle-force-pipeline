@@ -19,9 +19,9 @@ EXTERNAL_DIR = PROJECT_ROOT / "external"
 if str(EXTERNAL_DIR) not in sys.path:
     sys.path.append(str(EXTERNAL_DIR))
 
-from external.forces2 import ForceGenerator2 
-from trigrid import TriangleGrid  
-import bep  
+from forces2 import ForceGenerator2  # noqa: E402
+from trigrid import TriangleGrid  # noqa: E402
+import bep2 as bep  # noqa: E402
 
 
 def generate_aruco_markers(output_dir: str | Path, marker_ids: list[int] | None = None, tag_size: int = 300,) -> list[Path]:
