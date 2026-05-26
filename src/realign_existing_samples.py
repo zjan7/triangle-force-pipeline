@@ -11,9 +11,7 @@ from src.force_alignment import align_forces_to_opencv_order
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
-def find_sample_dirs(
-    accepted_samples_dir: str | Path = PROJECT_ROOT / "outputs" / "accepted_samples",
-) -> list[Path]:
+def find_sample_dirs(accepted_samples_dir: str | Path = PROJECT_ROOT / "outputs" / "accepted_samples",) -> list[Path]:
     accepted_samples_dir = Path(accepted_samples_dir)
 
     sample_dirs = [
@@ -24,9 +22,7 @@ def find_sample_dirs(
     return sorted(sample_dirs, key=lambda p: int(p.name.split("_")[1]))
 
 
-def realign_existing_samples(
-    accepted_samples_dir: str | Path = PROJECT_ROOT / "outputs" / "accepted_samples",
-) -> None:
+def realign_existing_samples(accepted_samples_dir: str | Path = PROJECT_ROOT / "outputs" / "accepted_samples",) -> None:
     sample_dirs = find_sample_dirs(accepted_samples_dir)
 
     print()

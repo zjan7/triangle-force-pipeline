@@ -132,14 +132,7 @@ def build_pytorch_dataset(
 
     output_path = output_dir / output_filename
 
-    np.savez_compressed(
-        output_path,
-        X=X_dataset,
-        y=y_dataset,
-        mask=mask,
-        sample_ids=sample_ids_array,
-        n_triangles=n_triangles_array,
-    )
+    np.savez_compressed(output_path, X=X_dataset, y=y_dataset, mask=mask, sample_ids=sample_ids_array, n_triangles=n_triangles_array,)
 
     summary = {
         "dataset_path": str(output_path),

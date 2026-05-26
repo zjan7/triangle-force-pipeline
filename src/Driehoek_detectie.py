@@ -1,3 +1,4 @@
+#deze code wordt niet gebruikt
 #hey, dit is de driehoekdetectiecode. Het detecteert eerst de driehoeken van de referentie en van de final en dan zoekt die matches uiteindelijk zie je hoeveel die heeft kunnen matchen. De IDs zijn alternerend weergegeven val linksboven omdat dit makkelijker leesbaar is maar zijn uiteindelijk enkel relevant om de matches te controleren en te geven
 import cv2
 import numpy as np
