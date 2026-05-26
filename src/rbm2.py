@@ -40,13 +40,7 @@ def _RZ(t: float) -> Mat3: # 3d rotation matrix around z
     return np.array([[cos(t), -sin(t), 0], [sin(t), cos(t), 0], [0, 0, 1]])
 
 class Flexure:
-    '''
-    Class containing the data of a PRBM flexure and the energy function
-
-    Contains:
-    - data, updated by the attached body.move()
-    - energy(), returns the potential energy of the flexure
-    '''
+    
     def __init__(self, bodyA: Body, attachpoint_localA: Vec3, bodyB: Body, attachpoint_localB: Vec3):
         # constant
         self.attachpoint_localA = attachpoint_localA
@@ -107,14 +101,7 @@ class Flexure:
         return energy
 
 class Body:
-    '''
-    Class containing data and functions of a PRBM rigidbody
-
-    Contains:
-    - data, updated by self.move()
-    - move(), updates the attached flexures
-    - energy(), calculates and returns energy due to external forces
-    '''
+    
     def __init__(self, name: str, position0: Vec3, dim: Literal[2, 3] = 3):
         self.name = name
         self.position0 = position0
@@ -161,10 +148,7 @@ class Body:
         return energy
 
 class PRBM:
-    '''
-    Contains useful functions for setting up a pseudo rigid body model.
-    These functions are just for convenience: it might be easier to set up something manual if you have a certain use case.
-    '''
+    
     def __init__(self):
         self.bodies: dict[str, Body] = {}
         self.flexures: dict[str, Flexure] = {}

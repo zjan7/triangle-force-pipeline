@@ -1,13 +1,9 @@
-#This code isn't used by pipeline
-from forcegen import ForceGenerator
 from trigrid import TriangleGrid
 import bep
-
 import os
 import cv2
 import matplotlib as mpl
 import matplotlib.pyplot as plt
-import matplotlib.colors as mcolors
 import matplotlib.image as mpimg
 import numpy as np
 import tqdm
@@ -26,21 +22,29 @@ def generate_aruco_markers():
     marker_paths = []
 
     for marker_id in marker_ids:
-        tag = cv2.aruco.generateImageMarker(aruco_dict, marker_id, tag_size, borderBits=1)
+        if hasattr(cv2.aruco, "generateImageMarker"):
+            tag = cv2.aruco.generateImageMarker(aruco_dict, marker_id, tag_size, borderBits=1)
+        else:
+            tag = np.zeros((tag_size, tag_size), dtype=np.uint8)
+            cv2.aruco.drawMarker(aruco_dict, marker_id, tag_size, tag, 1)
+
         tag_name = os.path.join(output_dir, f"{aruco_type}_{marker_id}.png")
         cv2.imwrite(tag_name, tag)
         marker_paths.append(tag_name)
+
     return marker_paths
 
 
 def place_marker(ax, image_path, center_x, center_y, size, label=None):
-   
     img = mpimg.imread(image_path)
+
     x0 = center_x - size / 2
     x1 = center_x + size / 2
     y0 = center_y - size / 2
     y1 = center_y + size / 2
+
     ax.imshow(img, extent=[x0, x1, y0, y1], cmap="gray", zorder=20)
+
     if label is not None:
         ax.text(center_x, y0 - size * 0.15, label, ha="center", va="top", fontsize=8)
 
@@ -50,40 +54,28 @@ def main():
     marker_paths = generate_aruco_markers()
     tri_grid_size = 10
     tris = TriangleGrid(0.0001, tri_grid_size)
-
-    forceg = ForceGenerator(tris.width() * 2, tris.height(), tris.height() * 0.1, tris.width() * 0.15, tris.width() * 0.2, 3, 0, 15, -4, 4, -4, 4)
-    forceg.show()
-
-    norm = mcolors.Normalize(vmin=-1, vmax=1)
-    cmap = plt.get_cmap("viridis")
     fig, ax = plt.subplots(figsize=(10, 10))
-    forces = []
+    zero_force = (0.0, 0.0, 0.0)
 
-    for i in range(tri_grid_size * 2):
-        force_column = []
-
-        for j in range(tri_grid_size):
-            tx, ty = tris.get_triangle_center(i, j)
-
-            force_vector = (forceg.shear_x(tx, ty), forceg.shear_y(tx, ty), -forceg.normal(tx, ty))
-
-            force_column.append(force_vector)
-
-        forces.append(force_column)
+    # Draw triangles using the SAME geometry pipeline as main.py,
+    # but now with zero force instead of real forces
     for i in tqdm.tqdm(range(tri_grid_size * 2)):
         for j in tqdm.tqdm(range(tri_grid_size), leave=False):
-            f_vec = forces[i][j]
-
-            c1, c2, c3 = bep.solve_module(f_vec)
+            c1, c2, c3 = bep.solve_module(zero_force)
 
             tc_x, tc_y = tris.get_triangle_center(i, j)
-            original_center = np.array([tc_x, tc_y, 0])
+            original_center = np.array([tc_x, tc_y, 0.0])
 
             c1 = c1 + original_center
             c2 = c2 + original_center
             c3 = c3 + original_center
 
-            ax.fill([c1[0], c2[0], c3[0]], [c1[1], c2[1], c3[1]], color="#00A6A6")
+            ax.fill(
+                [c1[0], c2[0], c3[0]],
+                [c1[1], c2[1], c3[1]],
+                color="#00A6A6"
+            )
+
     ax.set_aspect("equal")
 
     x_min, x_max = ax.get_xlim()
@@ -102,15 +94,17 @@ def main():
     # Right marker: ID 3
     place_marker(ax, marker_paths[2], center_x=x_max + margin + marker_size / 2, center_y=(y_min + y_max) / 2, size=marker_size)
 
-    # Expand the plot limits so the markers are visible
+    # SAME axis expansion as main.py
     ax.set_xlim(x_min - 2 * marker_size, x_max + 2 * marker_size)
     ax.set_ylim(y_min - marker_size, y_max + 2 * marker_size)
 
     ax.axis("equal")
     ax.axis("off")
 
-    plt.savefig("triangle_grid_with_aruco.png", dpi=300, bbox_inches="tight")
+    plt.savefig("reference_zero_force_with_aruco.png", dpi=300, bbox_inches="tight")
     plt.show()
+
+    print("Saved: reference_zero_force_with_aruco.png")
 
     input()
 

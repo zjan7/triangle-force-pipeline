@@ -1,10 +1,9 @@
-from forcegen import ForceGenerator
+#from forces1 import ForceGenerator
 import numpy as np
 from numpy import cos, sin, pi
 from rbm import PRBM
 import matplotlib.pyplot as plt
 from tqdm import tqdm
-from multipolyfit import multipolyfit
 
 side_length = 1e-2
 t_height = np.sqrt(3)/2 * side_length
@@ -32,11 +31,11 @@ def init_rbm():
     return p
 
 _prev_guess = None
-def solve_module(force_vec):
+def solve_module(force_vec, upside_down):
     global _prev_guess
     t = mm
     A = pi*t**2
-    E = 850e6 # Pa
+    E = 900e6 # Pa
     I = 0.1*pi*t**4/2
 
     p = init_rbm()
@@ -46,9 +45,16 @@ def solve_module(force_vec):
         _prev_guess = p.solution.x
     
     l = 4*mm
-    c1 = p.bodies['B'].rotmat@np.array([0, l, -0.5*depth]) + p.bodies['B'].position
-    c2 = p.bodies['B'].rotmat@np.array([-l*cos(pi/6), -l*sin(pi/6), -0.5*depth]) + p.bodies['B'].position
-    c3 = p.bodies['B'].rotmat@np.array([l*cos(pi/6), -l*sin(pi/6), -0.5*depth]) + p.bodies['B'].position
+
+    if upside_down:
+        c1 = p.bodies['B'].rotmat@np.array([0, l, -0.5*depth]) + p.bodies['B'].position
+        c2 = p.bodies['B'].rotmat@np.array([-l*cos(pi/6), -l*sin(pi/6), -0.5*depth]) + p.bodies['B'].position
+        c3 = p.bodies['B'].rotmat@np.array([l*cos(pi/6), -l*sin(pi/6), -0.5*depth]) + p.bodies['B'].position
+    else:
+        c1 = p.bodies['B'].rotmat@np.array([0, -l, -0.5*depth]) + p.bodies['B'].position
+        c2 = p.bodies['B'].rotmat@np.array([-l*cos(pi/6), l*sin(pi/6), -0.5*depth]) + p.bodies['B'].position
+        c3 = p.bodies['B'].rotmat@np.array([l*cos(pi/6), l*sin(pi/6), -0.5*depth]) + p.bodies['B'].position
+
     return (c1, c2, c3)
 
 

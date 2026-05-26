@@ -5,7 +5,14 @@ import numpy as np
 
 
 class TriangleGrid:
-    def __init__(self, width: float, height: float, triangle_area: float): 
+    def __init__(self, width: float, height: float, triangle_area: float):
+        """Helper class for managing grid of modules
+
+        Args:
+            width: Maximum width of module grid
+            height: Maximum height of module grid
+            triangle_area: Module surface area, used to determine dimensions of equilateral triangles in the grid.
+        """
         self.height = height
         self.width = width
         self.t_area = triangle_area
@@ -13,6 +20,7 @@ class TriangleGrid:
         self.t_height = np.sqrt(3)/2 * self.t_side
         self.n_x = int(self.width / (self.t_side / 2))
         self.n_y = int(self.height / (self.t_height))
+
     # Get center coordinate of triangle at index (i, j)
     def get_triangle_center(self, i: int, j: int):
         x: float = i * self.t_side/2

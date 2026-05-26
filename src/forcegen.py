@@ -10,22 +10,7 @@ ndfloatlist: TypeAlias = npt.NDArray[np.float64] | list[float]
 
 class ForceGenerator:
     def __init__(self, width: float, height: float, safe_distance: float, s_min: float, s_max: float, n_peaks_max: int, min_normal:float = 0, max_normal:float = 50, min_x_shear: float = -5, max_x_shear: float = 5, min_y_shear: float = -10, max_y_shear:float = 10):
-        """Create ForceGenerator instance
-
-        Args:
-            width: x range
-            height: y range
-            safe_distance: Minimum distance from edge of peak
-            s_min: Minimum distribution variance
-            s_max: Maximum distribution variance    
-            n_peaks_max: Max number of peaks    
-            min_normal: Minimum normal peak normal force. Defaults to 50.
-            max_normal: Maximum peak normal force. Defaults to 150.
-            min_x_shear: Minimum peak shear force. Defaults to 0.
-            max_x_shear: . Defaults to 10.
-            min_y_shear: _description_. Defaults to 0.
-            max_y_shear: _description_. Defaults to 100.
-        """
+        
         # bereik x
         self.width = width
         # bereik y

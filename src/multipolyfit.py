@@ -1,3 +1,4 @@
+#Code isn't used by pipeline
 from numpy import linalg, zeros, ones, hstack, asarray
 import itertools
 
@@ -15,39 +16,10 @@ def basis_vector(n, i):
     return x
 
 def as_tall(x):
-    """ Turns a row vector into a column vector """
     return x.reshape(x.shape + (1,))
 
 def multipolyfit(xs, y, deg, full=False, model_out=False, powers_out=False):
-    """
-    Least squares multivariate polynomial fit
-
-    Fit a polynomial like ``y = a**2 + 3a - 2ab + 4b**2 - 1``
-    with many covariates a, b, c, ...
-
-    Parameters
-    ----------
-
-    xs : array_like, shape (M, k)
-         x-coordinates of the k covariates over the M sample points
-    y :  array_like, shape(M,)
-         y-coordinates of the sample points.
-    deg : int
-         Degree o fthe fitting polynomial
-    model_out : bool (defaults to True)
-         If True return a callable function
-         If False return an array of coefficients
-    powers_out : bool (defaults to False)
-         Returns the meaning of each of the coefficients in the form of an
-         iterator that gives the powers over the inputs and 1
-         For example if xs corresponds to the covariates a,b,c then the array
-         [1, 2, 1, 0] corresponds to 1**1 * a**2 * b**1 * c**0
-
-    See Also
-    --------
-        numpy.polyfit
-
-    """
+   
     y = asarray(y).squeeze()
     rows = y.shape[0]
     xs = asarray(xs)
@@ -73,10 +45,7 @@ def multipolyfit(xs, y, deg, full=False, model_out=False, powers_out=False):
     return beta
 
 def mk_model(beta, powers):
-    """ Create a callable python function out of beta/powers from multipolyfit
 
-    This function is callable from within multipolyfit using the model_out flag
-    """
     # Create a function that takes in many x values
     # and returns an approximate y value
     def model(*args):

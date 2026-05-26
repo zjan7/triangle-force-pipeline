@@ -1,0 +1,60 @@
+from forcegen import ForceGenerator
+from trigrid import TriangleGrid
+import bep
+import matplotlib as mpl
+import matplotlib.pyplot as plt
+import matplotlib.colors as mcolors
+import numpy as np
+import tqdm
+import math 
+def normalize_angle_90(angle):
+    if angle > 90:
+        angle -= 180
+    elif angle < -90:
+        angle += 180
+
+    return angle
+
+
+def calculate_triangle_angle(vertices_x, vertices_y):
+    points = np.array(list(zip(vertices_x, vertices_y)))
+
+    # Voor de gegenereerde grid: y loopt omhoog,
+    # dus de onderste punten hebben de kleinste y-waarde.
+    sorted_points = points[points[:, 1].argsort()]
+
+    p1, p2 = sorted_points[0], sorted_points[1]
+
+    dx = p2[0] - p1[0]
+    dy = p2[1] - p1[1]
+
+    angle = math.degrees(math.atan2(dy, dx))
+
+    return normalize_angle_90(angle)
+
+
+def make_original_triangle_matrix(tris, tri_grid_size):
+    triangle_data = []
+    triangle_id = 0
+
+    for j in range(tri_grid_size):
+        for i in reversed(range(tri_grid_size * 2)):
+
+            center_x, center_y = tris.get_triangle_center(i, j)
+            vertices_x, vertices_y = tris.get_triangle_vertices(i, j)
+
+            angle = calculate_triangle_angle(vertices_x, vertices_y)
+
+            triangle_data.append([
+                triangle_id,
+                i,
+                j,
+                center_x,
+                center_y,
+                angle
+            ])
+            
+
+            triangle_id += 1
+
+    return np.array(triangle_data)
