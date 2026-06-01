@@ -19,9 +19,9 @@ EXTERNAL_DIR = PROJECT_ROOT / "external"
 if str(EXTERNAL_DIR) not in sys.path:
     sys.path.append(str(EXTERNAL_DIR))
 
-from forces2 import ForceGenerator2  # noqa: E402
-from trigrid import TriangleGrid  # noqa: E402
-import bep2 as bep  # noqa: E402
+from forces2 import ForceGenerator2 
+from trigrid import TriangleGrid  
+import bep2 as bep  
 
 
 def generate_aruco_markers(output_dir: str | Path, marker_ids: list[int] | None = None, tag_size: int = 300,) -> list[Path]:
@@ -70,7 +70,7 @@ def place_marker(
     ax.imshow(img, extent=[x0, x1, y0, y1], cmap="gray", zorder=20,)
 
     if label is not None:
-        ax.text(center_x, y0 - size * 0.15, nlabel, ha="center", va="top", fontsize=8,)
+        ax.text(center_x, y0 - size * 0.15, label, ha="center", va="top", fontsize=8)
 
 def save_force_plot(force_generator: ForceGenerator2, output_path: str | Path, grid_width: float, grid_height: float, resolution: float = 0.0025,) -> None:
     output_path = Path(output_path)
@@ -113,7 +113,7 @@ def save_force_plot(force_generator: ForceGenerator2, output_path: str | Path, g
     fig.savefig(output_path, dpi=300, pad_inches=0)
     plt.close(fig)
 
-def generate_deformation_sample(output_dir: str | Path = PROJECT_ROOT / "outputs" / "deformation_test", grid_width: float = 0.1, grid_height: float = 0.1, target_triangles: int = 200, marker_ids: list[int] | None = None, dpi: int = 300, show_plot: bool = False,) -> dict[str, Any]:
+def generate_deformation_sample(tris: TriangleGrid, output_dir: str | Path = PROJECT_ROOT / "outputs" / "deformation_test", marker_ids: list[int] | None = None, dpi: int = 300, show_plot: bool = False,) -> dict[str, Any]:
   
     mpl.interactive(False)
 
@@ -126,18 +126,21 @@ def generate_deformation_sample(output_dir: str | Path = PROJECT_ROOT / "outputs
     marker_dir = output_dir / "arucoMarkers"
     marker_paths = generate_aruco_markers(output_dir=marker_dir, marker_ids=marker_ids,)
 
-    module_area = (grid_width * grid_height) / target_triangles
-    tris = TriangleGrid(grid_width, grid_height, module_area)
-
     print("Deformation grid")
     print("n_x:", tris.n_x)
     print("n_y:", tris.n_y)
     print("Aantal driehoeken:", tris.n_x * tris.n_y)
     print("Triangle area:", tris.t_area)
-
+    grid_width = tris.width
+    grid_height = tris.height
+    grid_cell_area = tris.t_area
+    physical_triangle_area = getattr(tris, "physical_triangle_area", tris.t_area)
+    actual_triangles = tris.n_x * tris.n_y
+    print("Grid Cell area", grid_cell_area)
+    print("Physical triangle area", physical_triangle_area)
     normal_peak = 125000.0
     shear_peak = 2500.0
-    force_scale = 0.4 #voor kleine gridscale moet de forcescale veeeel kleiner (als je 20 driehoeken ipv 180 hebt bijvoorbeeld ga voor 0.05 als je 180 hebt ga voor 0.4) want nu zorgt het aantal triangles voor de kracht per triangle dus meer triangles is kleinere kracht per triangle terwijl weinig triangles een veel grotere kracht krijgen waardoor ze extreem ver verplaatsen
+    force_scale = 0.005 #voor kleine gridscale moet de forcescale veeeel kleiner (als je 20 driehoeken ipv 180 hebt bijvoorbeeld ga voor 0.05 als je 180 hebt ga voor 0.4) want nu zorgt het aantal triangles voor de kracht per triangle dus meer triangles is kleinere kracht per triangle terwijl weinig triangles een veel grotere kracht krijgen waardoor ze extreem ver verplaatsen
     force_generator = ForceGenerator2(grid_width, grid_height, 0.03, 0.02, 0.03, smoothness=1.2, sphere_factor=1.2, normal_peak=normal_peak, shear_peak=shear_peak,)
 
     force_plot_path = output_dir / "force_plot.png"
@@ -161,9 +164,9 @@ def generate_deformation_sample(output_dir: str | Path = PROJECT_ROOT / "outputs
             normal = force_scale * normal
             shear_x = force_scale * shear_x
             shear_y = force_scale * shear_y
-            actual_normal = tris.t_area * normal
-            actual_shear_x = tris.t_area * shear_x
-            actual_shear_y = tris.t_area * shear_y
+            actual_normal = physical_triangle_area * normal
+            actual_shear_x = physical_triangle_area * shear_x
+            actual_shear_y = physical_triangle_area * shear_y
 
             solver_force_vector = [
                 actual_normal,
@@ -228,6 +231,26 @@ def generate_deformation_sample(output_dir: str | Path = PROJECT_ROOT / "outputs
         corners.append(corners_row)
 
     corners_array = np.array(corners, dtype=float)
+    deformed_centers = corners_array[:, :, :, :2].mean(axis=2)
+    reference_centers = np.zeros_like(deformed_centers)
+    for i in range(tris.n_x):
+        for j in range(tris.n_y):
+            reference_centers[i, j] = np.array(tris.get_triangle_center(i, j))
+
+    displacements = deformed_centers - reference_centers
+    disp_mag = np.linalg.norm(displacements, axis=2)
+
+    print("Deformation displacement diagnostics")
+    print("------------------------------------")
+    print(f"Mean displacement: {np.mean(disp_mag):.6e} m")
+    print(f"Max displacement:  {np.max(disp_mag):.6e} m")
+    physical_triangle_radius = float(
+    np.sqrt(physical_triangle_area / ((3 * np.sqrt(3)) / 4)))
+
+    grid_cell_radius = float(np.sqrt(grid_cell_area / ((3 * np.sqrt(3)) / 4)))
+
+    print(f"Physical triangle radius: {physical_triangle_radius:.6e} m")
+    print(f"Grid cell radius:         {grid_cell_radius:.6e} m")
 
     x_min = 0.0
     x_max = grid_width
@@ -248,10 +271,11 @@ def generate_deformation_sample(output_dir: str | Path = PROJECT_ROOT / "outputs
     place_marker(ax, marker_paths[2], center_x=x_max + margin + marker_size / 2, center_y=(y_min + y_max) / 2, size=marker_size,)
 
     # Expand limits so markers are visible.
-    plot_x_min = -0.04
-    plot_x_max = 0.14
-    plot_y_min = -0.04
-    plot_y_max = 0.14
+    plot_margin = marker_size * 2.5
+    plot_x_min = x_min - plot_margin
+    plot_x_max = x_max + plot_margin
+    plot_y_min = y_min - plot_margin
+    plot_y_max = y_max + plot_margin
 
     ax.set_xlim(plot_x_min, plot_x_max)
     ax.set_ylim(plot_y_min, plot_y_max)
@@ -278,14 +302,15 @@ def generate_deformation_sample(output_dir: str | Path = PROJECT_ROOT / "outputs
     metadata = {
         "grid_width": grid_width,
         "grid_height": grid_height,
-        "target_triangles": target_triangles,
-        "module_area": module_area,
         "n_x": int(tris.n_x),
         "n_y": int(tris.n_y),
         "n_triangles": int(tris.n_x * tris.n_y),
-        "triangle_area": float(tris.t_area),
+        "grid_cell_area": float(grid_cell_area),
+        "physical_triangle_area": float(physical_triangle_area),
         "marker_ids": marker_ids,
         "normal_peak": float(normal_peak),
+        "force_scale": float(force_scale),
+        "shear_peak": float(shear_peak),
         "deformed_image": str(deformed_image_path),
         "deformed_corners": str(corners_path),
         "force_matrix_full": str(force_matrix_path),

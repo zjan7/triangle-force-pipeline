@@ -29,17 +29,18 @@ from prbm2.types_ import BodyState, FlexureDef, Params, State, Vec3, Wrench
 
 mm = 1e-3
 
-depth    = 10 * mm
-r_attach = 8.773827 * mm
-l        = 4 * mm   
+depth    = 27.5 * mm #hoogte bovenplaat tot onderplaat
+r_attach = 9.32 * mm #afstand tussen middelpunt driehoek naar zijkant waar flexure start
+z        = 33.75 * mm   #lengte staaf midden naar uiteinden 
+l        = 7 *mm #afstand midden van detectie driehoek naar punt
 
-t     = 1.0 * mm
-E     = 850e6
-I     = 0.1 * pi * (1e-3)**4 / 2
-A_sec = pi * t**2
+t     =  1.25* mm #radius flexure
+E     =26e6 #E modulusI     
+I = pi * (2 * t)**4 / 64 #second moment of inertia ronde balk
+A_sec = pi * t**2 
 
-gamma    = 0.85
-kappa_th = 2.65
+gamma    = 0.85 #moeten nog kloppen uit literatuur
+kappa_th = 2.65 #moeten nog kloppen uit literatuur
 
 _chord = 2 * r_attach * float(jnp.sin(pi / 3))  # in-plane chord between attachment points
 L0     = float(jnp.sqrt(_chord**2 + (depth / 2)**2))  # actual 3D flexure length
@@ -48,7 +49,7 @@ k_ex = E * A_sec / (gamma * L0)
 
 mu    = 0.5 * (1 - gamma)
 alpha = 0.5
-rho   = 1200.0
+rho   = 1200.0 #materiaal dichtheid
 m_flex = rho * A_sec * L0
 m_body = 0.0
 
@@ -128,7 +129,6 @@ def _contact_points_local(upside_down: bool) -> tuple[Vec3, Vec3, Vec3]:
         c2 at angle  210°  ( -l·cos30°, -l·sin30°, -depth/2 )
         c3 at angle  330°  (  l·cos30°, -l·sin30°, -depth/2 )
     """
-    z = -0.5 * depth
     c30 = float(jnp.cos(pi / 6))
     s30 = float(jnp.sin(pi / 6))  # = 0.5
 

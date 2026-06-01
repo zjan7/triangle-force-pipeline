@@ -1,3 +1,33 @@
 .venv
 __pycache__
 outputs*
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+venv/
+env/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Outputs
+outputs/*
+!outputs/.gitkeep
+
+# Input images
+inputs/*
+!inputs/.gitkeep
+!inputs/README_inputs.txt
+
+# Generated numerical/data files
+*.npy
+*.npz
+
+# OS/editor
+.DS_Store
+Thumbs.db
+.vscode/

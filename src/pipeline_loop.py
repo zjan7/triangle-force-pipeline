@@ -1,11 +1,15 @@
 #(pipe)This code creates the entire pipeline! next file is reference_generator.py
 from __future__ import annotations
-
+import sys
 import csv
 import json
 from pathlib import Path
 from typing import Any
-
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+EXTERNAL_DIR = PROJECT_ROOT / "external"
+if str(EXTERNAL_DIR) not in sys.path:
+    sys.path.append(str(EXTERNAL_DIR))
+from trigrid import TriangleGrid
 from src.reference_generator import generate_reference
 from src.deformation_generator import generate_deformation_sample
 from src.aruco_warp import warp_deformed_to_reference
@@ -13,9 +17,7 @@ from src.triangle_detection import run_triangle_detection
 from src.dataset_writer import write_accepted_sample
 from src.sample_quality import evaluate_sample_quality, write_quality_report, move_rejected_sample
 from src.validate_deformation_detection import validate_detected_deformations
-
-
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
+from src.grid_config import grid_size_from_bep2_triangle_area
 
 
 def get_next_sample_id(
@@ -77,25 +79,40 @@ def save_summary_json(path: str | Path, summary: dict[str, Any]) -> None:
 def run_one_sample(
     sample_id: int,
     attempt_id: int | None = None,
-    grid_width: float = 0.1,
-    grid_height: float = 0.1,
-    target_triangles: int = 200,
+    tris: TriangleGrid | None = None,
     reference_result: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
 
+    if tris is None:
+        raise ValueError("run_one-sample() requires trianglegrid object")
+        
+
     if attempt_id is None:
         attempt_id = sample_id
-
+    grid_width = tris.width
+    grid_height = tris.height
+    triangle_area = tris.t_area
+    physical_triangle_area = getattr(tris, "physical_triangle_area", tris.t_area)
+    actual_triangles = tris.n_x * tris.n_y
     print()
     print("=" * 80)
     print(f"Attempt {attempt_id:06d} -> sample {sample_id:06d}")
     print("=" * 80)
+    print(f"Grid width:              {grid_width:.6f} m")
+    print(f"Grid height:             {grid_height:.6f} m")
+    print(f"TriangleGrid area:       {triangle_area:.8e} m²")
+    print(f"Physical triangle area:  {physical_triangle_area:.8e} m²")
+    print(f"Actual triangles:        {actual_triangles}")
+    attempt_dir = PROJECT_ROOT / "outputs" / "attempts" / f"attempt{attempt_id:06d}"
+    attempt_dir.mkdir(parents=True, exist_ok=True)
+    if reference_result is None: 
+        reference_result = generate_reference(tris=tris, output_dir=PROJECT_ROOT / "outputs" / "reference", show_plot=False,)
+    print("Starting deformation generation..")
 
-    if reference_result is None:
-        reference_result = generate_reference(output_dir=PROJECT_ROOT / "outputs" / "reference", grid_width=grid_width, grid_height=grid_height, target_triangles=target_triangles, show_plot=False,)
-
-    deformation_result = generate_deformation_sample(output_dir=PROJECT_ROOT / "outputs" / "deformation_test", grid_width=grid_width, grid_height=grid_height, target_triangles=target_triangles, show_plot=False,)
-
+    deformation_result = generate_deformation_sample(tris=tris, output_dir=attempt_dir / "deformation", show_plot=False,)
+    print("Finished deformation generation")
+    
+    
     aruco_result = warp_deformed_to_reference(
         reference_image_path=reference_result["reference_image_path"],
         deformed_image_path=deformation_result["deformed_image_path"],
@@ -130,9 +147,9 @@ def run_one_sample(
 def run_dataset_generation(
     n_accepted_samples: int = 10,
     max_attempts: int = 100,
-    grid_width: float = 0.1,
-    grid_height: float = 0.1,
     target_triangles: int = 200,
+    aspect_ratio: float = 1.0,
+    packing_factor: float = 2.5,
 ) -> dict[str, Any]:
     
     outputs_dir = PROJECT_ROOT / "outputs"
@@ -148,7 +165,20 @@ def run_dataset_generation(
     accepted_this_run = 0
     rejected_this_run = 0
     attempts = 0
+    grid_width, grid_height, physical_triangle_area, grid_cell_area = grid_size_from_bep2_triangle_area(
+        target_triangles=target_triangles,
+        aspect_ratio=aspect_ratio,
+        packing_factor=packing_factor,
+    )
 
+    tris = TriangleGrid(
+        grid_width,
+        grid_height,
+        grid_cell_area,
+    )
+    tris.physical_triangle_area = physical_triangle_area
+
+    actual_triangles = tris.n_x * tris.n_y
     print()
     print("#" * 80)
     print("START DATASET GENERATION")
@@ -158,22 +188,14 @@ def run_dataset_generation(
     print(f"First sample ID this run:         {start_sample_id}")
     print()
 
-    reference_result = generate_reference(output_dir=PROJECT_ROOT / "outputs" / "reference", grid_width=grid_width, grid_height=grid_height, target_triangles=target_triangles, show_plot=False,)
-
+    reference_result = generate_reference(tris=tris, output_dir=PROJECT_ROOT / "outputs" / "reference", show_plot=False,)
     while accepted_this_run < n_accepted_samples and attempts < max_attempts:
         attempts += 1
         attempt_id = attempts
         sample_id = start_sample_id + accepted_this_run
 
         try:
-            result = run_one_sample(
-                sample_id=sample_id,
-                attempt_id=attempt_id,
-                grid_width=grid_width,
-                grid_height=grid_height,
-                target_triangles=target_triangles,
-                reference_result=reference_result,
-            )
+            result = run_one_sample(sample_id=sample_id, attempt_id=attempt_id, tris=tris, reference_result=reference_result,)
 
             sample_dir = Path(result["sample_dir"])
             validation_output_dir = sample_dir / "validation"
@@ -285,6 +307,10 @@ def run_dataset_generation(
         "grid_width": grid_width,
         "grid_height": grid_height,
         "target_triangles": target_triangles,
+        "actual_triangles": actual_triangles,
+        "physical_triangle_area": physical_triangle_area,
+        "grid_cell_area": grid_cell_area,
+        "packing_factor": packing_factor,
         "dataset_index_csv": str(dataset_index_path),
         "rejected_attempts_csv": str(rejected_attempts_path),
         "accepted_samples_dir": str(accepted_samples_dir),

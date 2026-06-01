@@ -21,7 +21,7 @@ if str(EXTERNAL_DIR) not in sys.path:
     sys.path.append(str(EXTERNAL_DIR))
 
 from trigrid import TriangleGrid  
-import bep  
+import bep2 as bep  
 
 def generate_aruco_markers(
     output_dir: str | Path,
@@ -76,10 +76,8 @@ def place_marker(
         ax.text(center_x, y0 - size * 0.15, label, ha="center", va="top", fontsize=8,)
 
 def generate_reference(
+    tris: TriangleGrid,
     output_dir: str | Path = PROJECT_ROOT / "outputs" / "reference",
-    grid_width: float = 0.1,
-    grid_height: float = 0.1,
-    target_triangles: int = 200,
     marker_ids: list[int] | None = None,
     dpi: int = 300,
     show_plot: bool = False,
@@ -92,12 +90,15 @@ def generate_reference(
 
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
+    grid_width = tris.width
+    grid_height = tris.height
+    triangle_area = tris.t_area
+    actual_triangles = tris.n_x * tris.n_y
+    grid_cell_area = tris.t_area
+    physical_triangle_area = getattr(tris, "physical_triangle_area", tris.t_area)
 
     marker_dir = output_dir / "arucoMarkers"
     marker_paths = generate_aruco_markers(output_dir=marker_dir, marker_ids=marker_ids,)
-
-    module_area = (grid_width * grid_height) / target_triangles
-    tris = TriangleGrid(grid_width, grid_height, module_area)
 
     print("Reference grid")
     print("n_x:", tris.n_x)
@@ -216,10 +217,11 @@ def generate_reference(
     place_marker(ax, marker_paths[2], center_x=x_max + margin + marker_size / 2, center_y=(y_min + y_max) / 2, size=marker_size,)
 
     # Expand limits so markers are visible.
-    plot_x_min = -0.04
-    plot_x_max = 0.14
-    plot_y_min = -0.04
-    plot_y_max = 0.14
+    plot_margin = marker_size * 2.5
+    plot_x_min = x_min - plot_margin
+    plot_x_max = x_max + plot_margin
+    plot_y_min = y_min - plot_margin
+    plot_y_max = y_max + plot_margin
 
     ax.set_xlim(plot_x_min, plot_x_max)
     ax.set_ylim(plot_y_min, plot_y_max)
@@ -246,12 +248,11 @@ def generate_reference(
     metadata = {
         "grid_width": grid_width,
         "grid_height": grid_height,
-        "target_triangles": target_triangles,
-        "module_area": module_area,
+        "actual_triangles": int(actual_triangles),
+        "grid_cell_area": float(grid_cell_area),
         "n_x": int(tris.n_x),
         "n_y": int(tris.n_y),
         "n_triangles": int(tris.n_x * tris.n_y),
-        "triangle_area": float(tris.t_area),
         "marker_ids": marker_ids,
         "reference_image": str(reference_image_path),
         "reference_corners": str(reference_corners_path),
