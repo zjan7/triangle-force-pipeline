@@ -1,6 +1,7 @@
 ﻿numpy
 pandas
 matplotlib
+pypylon
 opencv-contrib-python
 scipy
 tqdm

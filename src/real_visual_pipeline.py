@@ -1,4 +1,4 @@
-#code voor testversie Sweder
+#code voor testversie Sweder, als de driehoeken niet worden gevonden: ga naar line 394 en verander de waardes, volgende code is main_run_real_visual_pipeline.py
 from __future__ import annotations
 
 import json
@@ -183,8 +183,20 @@ def segment_orange_triangles(
     lower = np.array(lower_orange, dtype=np.uint8)
     upper = np.array(upper_orange, dtype=np.uint8)
 
-    mask = cv2.inRange(hsv, lower, upper)
+    hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
 
+    lower_main = np.array(lower_orange, dtype=np.uint8)
+    upper_main = np.array(upper_orange, dtype=np.uint8)
+    mask_main = cv2.inRange(hsv, lower_main, upper_main)
+    lower_pale = np.array([0, 0, 115], dtype=np.uint8)
+    upper_pale = np.array([179, 80, 255], dtype=np.uint8)
+    mask_pale = cv2.inRange(hsv, lower_pale, upper_pale)
+    mask = cv2.bitwise_or(mask_main, mask_pale)
+    kernel_close = np.ones((7, 7), np.uint8)
+    kernel_open = np.ones((3, 3), np.uint8)
+
+    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel_close, iterations=1)
+    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel_open, iterations=1)
     # Smooth small pixel noise before morphology.
     mask = cv2.medianBlur(mask, 5)
 
@@ -212,23 +224,23 @@ def segment_orange_triangles(
 
     return cleaned
 
-def assign_ids_by_grid(
-    triangles: list[dict[str, Any]],
-    row_tolerance_px: float,
-) -> list[dict[str, Any]]:
+def assign_ids_by_grid(triangles, row_tolerance_px=5):
+    print(f"DEBUG: assign_ids_by_grid is used with row_tolerance_px={row_tolerance_px}")
     if len(triangles) == 0:
         return triangles
 
-    triangles_sorted_y = sorted(triangles, key=lambda t: t["centroid"][1])
-    rows: list[list[dict[str, Any]]] = []
+    # Sort all triangles from top to bottom
+    sorted_triangles = sorted(triangles, key=lambda t: t["centroid"][1])
 
-    for tri in triangles_sorted_y:
-        cx, cy = tri["centroid"]
+    rows = []
+
+    for tri in sorted_triangles:
+        cy = tri["centroid"][1]
+
         placed = False
 
         for row in rows:
-            row_y_values = [item["centroid"][1] for item in row]
-            row_mean_y = float(np.mean(row_y_values))
+            row_mean_y = np.mean([r["centroid"][1] for r in row])
 
             if abs(cy - row_mean_y) <= row_tolerance_px:
                 row.append(tri)
@@ -238,24 +250,22 @@ def assign_ids_by_grid(
         if not placed:
             rows.append([tri])
 
-    rows = sorted(rows, key=lambda row: np.mean([item["centroid"][1] for item in row]))
+    # Sort rows from top to bottom
+    rows = sorted(rows, key=lambda row: np.mean([t["centroid"][1] for t in row]))
 
+    triangle_id = 0
     output = []
-    current_id = 0
 
-    for row_index, row in enumerate(rows):
+    for row in rows:
+        # Sort each row from left to right
         row_sorted = sorted(row, key=lambda t: t["centroid"][0])
 
-        for col_index, tri in enumerate(row_sorted):
-            tri["row"] = row_index
-            tri["col"] = col_index
-            tri["id"] = current_id
-
+        for tri in row_sorted:
+            tri["id"] = triangle_id
             output.append(tri)
-            current_id += 1
+            triangle_id += 1
 
     return output
-
 
 def draw_detected_triangles(
     image: np.ndarray,
@@ -372,7 +382,7 @@ def detect_orange_triangles(
     if assign_ids:
         triangles = assign_ids_by_grid(
             triangles,
-            row_tolerance_px=row_tolerance_px,
+            row_tolerance_px=33,
         )
 
     annotated = draw_detected_triangles(
@@ -391,10 +401,10 @@ def estimate_dynamic_thresholds(
         return {
             "median_area": 0.0,
             "median_spacing": 0.0,
-            "min_area": 1000.0,
+            "min_area": 900.0, #dit moet aangepast worden als er niet genoeg driehoeken worden gedetecteerd of teveel (lager als je te weinig detecteerd) (hoger als je teveel detecteerd )
             "max_area": 1_000_000.0,
-            "row_tolerance_px": 30.0,
-            "matching_max_distance": 60.0,
+            "row_tolerance_px": 100.0, #dit moet aangepast worden naargelang afstand van de driehoeken in de afbeelding
+            "matching_max_distance": 30.0,
         }
 
     areas = np.array([tri["area_px2"] for tri in reference_triangles], dtype=float)
@@ -693,7 +703,7 @@ def run_real_visual_pipeline(
         min_area=10,
         max_area=1_000_000,
         assign_ids=False,
-        row_tolerance_px=30.0,
+        row_tolerance_px=700.0,
         lower_orange=lower_orange,
         upper_orange=upper_orange,
     )
