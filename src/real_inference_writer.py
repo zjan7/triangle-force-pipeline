@@ -124,6 +124,10 @@ def write_real_inference_sample(
         real_pipeline_result,
         ["checks_path"],
     )
+    vertex_mapping_path = get_path_from_result(
+        real_pipeline_result,
+        ["vertex_mapping_path"],
+    )
 
     if X_displacements_path is None:
         raise FileNotFoundError("Could not find X_displacements_path in real_pipeline_result.")
@@ -133,9 +137,11 @@ def write_real_inference_sample(
 
     X_output_path = pytorch_dir / "X_displacements.npy"
     triangle_matrix_output_path = full_matrices_dir / "triangle_matrix_full.npy"
+    vertex_mapping_output_path = full_matrices_dir / "vertex_mapping.npy"
 
     copy_file(X_displacements_path, X_output_path)
     copy_file(triangle_matrix_full_path, triangle_matrix_output_path)
+    copy_file(vertex_mapping_path, vertex_mapping_output_path)
 
     X = np.load(X_output_path)
 
@@ -187,6 +193,14 @@ def write_real_inference_sample(
             "dx_px",
             "dy_px",
             "rotation_deg",
+        ],
+        "vertex_mapping_path": str(vertex_mapping_output_path),
+        "vertex_mapping_shape": list(np.load(vertex_mapping_output_path).shape) if vertex_mapping_output_path.exists() else None,
+        "vertex_mapping_columns": [
+            "ref_x_px",
+            "ref_y_px",
+            "def_x_px",
+            "def_y¨_px",
         ],
         "ready_for_neural_network": bool(real_pipeline_result.get("ready_for_neural_network", False)),
         "important_note": (

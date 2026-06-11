@@ -6,6 +6,7 @@ import traceback
 
 from src.real_visual_pipeline import run_real_visual_pipeline
 from src.real_inference_writer import write_real_inference_sample
+from datetima import datetime
 
 
 PROJECT_DIR = Path(r"C:\Users\zibej\Documents\beppy")

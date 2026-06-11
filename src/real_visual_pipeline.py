@@ -508,6 +508,8 @@ def match_deformed_to_reference(
                 "reference_solidity": ref_tri.get("solidity"),
                 "deformed_solidity": def_tri.get("solidity"),
                 "deformed_internal_index": int(def_index),
+                "reference_vertices": np.asarray(ref_tri["vertices"], dtype=float),
+                "deformed_vertices": np.asarray(def_tri["vertices"], dtype=float),
             }
         )
 
@@ -647,7 +649,24 @@ def build_matrices_from_matches(
     )
 
     return triangle_matrix_full, X_displacements
-
+def build_vertex_mapping_from_matches(matches: list[dict[str, Any]],)-> np.ndarray:
+    vertex_mapping = []
+    for m in matches: 
+        ref_vertices = np.asarray(m["reference_vertices"], dtype=float)
+        def_vertices = np.asarray(m["deformed_vertices"], dtype=float)
+        if ref_vertices.shape != (3, 2):
+            raise ValueError(f"Deformed vertices for triangle ID {m['ID']} must have shape (3, 2),")
+        mapped_vertices = np.column_stack(
+            [
+                ref_vertices[:, 0],
+                ref_vertices[:, 1],
+                def_vertices[:, 0],
+                def_vertices[:, 1],
+            ]
+        )
+        vertex_mapping.append(mapped_vertices)
+    return np.asarray(vertex_mapping, dtype=float)
+    
 
 def run_real_visual_pipeline(
     reference_image_path: str | Path,
@@ -737,6 +756,7 @@ def run_real_visual_pipeline(
     )
 
     triangle_matrix_full, X_displacements = build_matrices_from_matches(matches)
+    vertex_mapping = build_vertex_mapping_from_matches(matches)
 
     df = pd.DataFrame(matches)
 
@@ -774,6 +794,7 @@ def run_real_visual_pipeline(
     json_path = detection_output_dir / "triangle_matches.json"
     triangle_matrix_full_path = detection_output_dir / "triangle_matrix_full.npy"
     X_displacements_path = detection_output_dir / "X_displacements.npy"
+    vertex_mapping_path = detection_output_dir / "vertex_mapping.npy"
     checks_path = detection_output_dir / "visual_check_report.json"
 
     deformed_matched_ids = draw_matched_deformed_ids(aligned_deformed_img, matches)
@@ -795,6 +816,7 @@ def run_real_visual_pipeline(
 
     np.save(triangle_matrix_full_path, triangle_matrix_full)
     np.save(X_displacements_path, X_displacements)
+    np.save(vertex_mapping_path, vertex_mapping)
 
     n_ref = len(reference_triangles)
     n_def = len(deformed_triangles)
@@ -854,6 +876,7 @@ def run_real_visual_pipeline(
                 "triangle_matches_json": str(json_path),
                 "triangle_matrix_full": str(triangle_matrix_full_path),
                 "X_displacements": str(X_displacements_path),
+                "vertex_mapping": str(vertex_mapping_path),
             },
         }
     )
@@ -889,4 +912,6 @@ def run_real_visual_pipeline(
         "X_displacements_path": X_displacements_path,
         "triangle_matrix_full_path": triangle_matrix_full_path,
         "checks_path": checks_path,
+        "vertex_mapping": vertex_mapping,
+        "vertex_mapping_path": vertex_mapping_path,
     }
