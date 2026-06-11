@@ -1,0 +1,550 @@
+#(pipe)This code decides the deformation image next is the aruco warp code
+from __future__ import annotations
+
+import json
+import sys
+from pathlib import Path
+from typing import Any
+
+import cv2
+import matplotlib as mpl
+import matplotlib.image as mpimg
+import matplotlib.pyplot as plt
+import numpy as np
+import tqdm
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+EXTERNAL_DIR = PROJECT_ROOT / "external"
+
+if str(EXTERNAL_DIR) not in sys.path:
+    sys.path.append(str(EXTERNAL_DIR))
+
+import jax.numpy as jnp
+from jax import vmap, jit
+from jax.numpy import pi, cos, sin
+
+from module_parameters import ModuleParams
+from solve_module import get_sim_params, _get_cached_solver
+from prbdm.math import rot_mat
+from prbdm.types_ import Params
+
+from forces2 import ForceGenerator2 
+from trigrid import TriangleGrid  
+#import bep2 as bep  
+
+
+def generate_aruco_markers(output_dir: str | Path, marker_ids: list[int] | None = None, tag_size: int = 300,) -> list[Path]:
+  
+    if marker_ids is None:
+        marker_ids = [1, 2, 3]
+
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    aruco_type = "DICT_4X4_100"
+    aruco_dict = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_4X4_100)
+
+    marker_paths: list[Path] = []
+
+    for marker_id in marker_ids:
+        if hasattr(cv2.aruco, "generateImageMarker"):
+            tag = cv2.aruco.generateImageMarker(aruco_dict, marker_id, tag_size, borderBits=1,)
+        else:
+            tag = np.zeros((tag_size, tag_size), dtype=np.uint8)
+            cv2.aruco.drawMarker(aruco_dict, marker_id, tag_size, tag, 1,)
+
+        tag_path = output_dir / f"{aruco_type}_{marker_id}.png"
+        cv2.imwrite(str(tag_path), tag)
+        marker_paths.append(tag_path)
+
+    return marker_paths
+
+
+def place_marker(
+    ax: plt.Axes,
+    image_path: str | Path,
+    center_x: float,
+    center_y: float,
+    size: float,
+    label: str | None = None,
+) -> None:
+    image_path = Path(image_path)
+    img = mpimg.imread(image_path)
+
+    x0 = center_x - size / 2
+    x1 = center_x + size / 2
+    y0 = center_y - size / 2
+    y1 = center_y + size / 2
+
+    ax.imshow(img, extent=[x0, x1, y0, y1], cmap="gray", zorder=20,)
+
+    if label is not None:
+        ax.text(center_x, y0 - size * 0.15, label, ha="center", va="top", fontsize=8)
+
+def save_force_plot(force_generator: ForceGenerator2,
+    output_path: str | Path,
+    grid_width: float,
+    grid_height: float,
+    normal_force_scale: float = 1.0,
+    shear_force_scale: float = 1.0,
+    resolution: float = 0.0025,) -> None:
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    x_range = np.arange(0, grid_width + resolution, resolution)
+    y_range = np.arange(0, grid_height + resolution, resolution)
+    x_grid, y_grid = np.meshgrid(x_range, y_range)
+
+    normal_grid = np.zeros_like(x_grid, dtype=float)
+    shear_x_grid = np.zeros_like(x_grid, dtype=float)
+    shear_y_grid = np.zeros_like(x_grid, dtype=float)
+
+    for row in range(x_grid.shape[0]):
+        for col in range(x_grid.shape[1]):
+            normal, shear_x, shear_y = force_generator(float(x_grid[row, col]), float(y_grid[row, col]),)
+            normal_grid[row, col] = normal_force_scale * normal
+            shear_x_grid[row, col] = shear_force_scale * shear_x
+            shear_y_grid[row, col] = shear_force_scale * shear_y
+            
+
+    fig, axes = plt.subplots(1, 3, figsize=(20, 6))
+
+    im1 = axes[0].pcolormesh(x_grid, y_grid, normal_grid, cmap="viridis", shading="auto",)
+    axes[0].set_title("Normal force / pressure")
+    axes[0].set_aspect("equal")
+    fig.colorbar(im1, ax=axes[0])
+
+    im2 = axes[1].pcolormesh(x_grid, y_grid, shear_x_grid, cmap="RdBu_r", shading="auto",)
+    axes[1].set_title("Shear force X")
+    axes[1].set_aspect("equal")
+    fig.colorbar(im2, ax=axes[1])
+
+    im3 = axes[2].pcolormesh(x_grid, y_grid, shear_y_grid, cmap="RdBu_r", shading="auto",)
+    axes[2].set_title("Shear force Y")
+    axes[2].set_aspect("equal")
+    fig.colorbar(im3, ax=axes[2])
+
+    plt.tight_layout()
+    fig.savefig(output_path, dpi=300, pad_inches=0)
+    plt.close(fig)
+
+
+
+
+def get_effective_force_moment_3d(c_x, c_y, v_x, v_y, forces):
+    F_net = np.array(forces, dtype=float).sum(axis=0)
+
+    r = np.stack(
+        [
+            np.array(v_x, dtype=float) - float(c_x),
+            np.array(v_y, dtype=float) - float(c_y),
+            np.zeros(3, dtype=float),
+        ],
+        axis=1,
+    )
+
+    M_net = np.cross(r, forces).sum(axis=0)
+
+    return F_net, M_net
+
+
+def make_batched_solver(mod_par: ModuleParams, sim_par: Params):
+    solve_cached = _get_cached_solver(mod_par, sim_par)
+
+    def solve_single(F, M, flip):
+        q_opt, _, _ = solve_cached(F, M)
+
+        R = rot_mat(q_opt[0].rot)
+
+        sign = jnp.where(flip, 1.0, -1.0)
+
+        c1_0 = jnp.array(
+            [0.0, sign * mod_par.l, -0.5 * mod_par.depth]
+        ) + q_opt[0].pos
+
+        c2_0 = jnp.array(
+            [-mod_par.l * cos(pi / 6), -sign * mod_par.l * sin(pi / 6), -0.5 * mod_par.depth]
+        ) + q_opt[0].pos
+
+        c3_0 = jnp.array(
+            [mod_par.l * cos(pi / 6), -sign * mod_par.l * sin(pi / 6), -0.5 * mod_par.depth]
+        ) + q_opt[0].pos
+
+        c1 = R @ c1_0
+        c2 = R @ c2_0
+        c3 = R @ c3_0
+
+        return c1, c2, c3
+
+    return jit(vmap(solve_single))
+
+
+
+
+
+
+
+
+
+
+def generate_deformation_sample(
+    tris: TriangleGrid,
+    output_dir: str | Path = PROJECT_ROOT / "outputs" / "deformation_test",
+    marker_ids: list[int] | None = None,
+    dpi: int = 300,
+    show_plot: bool = False,
+) -> dict[str, Any]:
+
+    mpl.interactive(False)
+
+    if marker_ids is None:
+        marker_ids = [1, 2, 3]
+
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    marker_dir = output_dir / "arucoMarkers"
+    marker_paths = generate_aruco_markers(
+        output_dir=marker_dir,
+        marker_ids=marker_ids,
+    )
+
+    print("Deformation grid")
+    print("n_x:", tris.n_x)
+    print("n_y:", tris.n_y)
+    print("Aantal driehoeken:", tris.n_x * tris.n_y)
+    print("Triangle area:", tris.t_area)
+
+    grid_width = tris.width
+    grid_height = tris.height
+    grid_cell_area = tris.t_area
+    physical_triangle_area = getattr(tris, "physical_triangle_area", tris.t_area)
+
+    print("Grid Cell area", grid_cell_area)
+    print("Physical triangle area", physical_triangle_area)
+    mod_par = ModuleParams(
+        t_side=11e-3,
+        E_mod=26e6,
+        depth=27.5e-3,
+        r_attach=9.32e-3,
+        t_plat=2.5e-3,
+        t_flex=1.25e-3,
+        z=33.75e-3,
+        l=7e-3,
+    )
+
+    sim_par = get_sim_params(mod_par)
+    batched_solve = make_batched_solver(mod_par, sim_par)
+
+    normal_peak = 1.9 / physical_triangle_area
+    shear_peak = 0.92 / physical_triangle_area
+    
+    physical_triangle_radius = float(
+        np.sqrt(physical_triangle_area / ((3 * np.sqrt(3)) / 4))
+    )
+
+    grid_cell_radius = float(
+        np.sqrt(grid_cell_area / ((3 * np.sqrt(3)) / 4))
+    )
+
+    MAX_CORNER_DISPLACEMENT_FACTOR = 0.78
+    MAX_SOLVER_LIMIT_ATTEMPTS = 10
+
+    max_allowed_corner_displacement = (
+        MAX_CORNER_DISPLACEMENT_FACTOR * physical_triangle_radius
+    )
+
+    print(f"Physical triangle radius: {physical_triangle_radius:.6e} m")
+    print(f"Grid cell radius:         {grid_cell_radius:.6e} m")
+    print(f"Max allowed corner displacement: {max_allowed_corner_displacement:.6e} m")
+
+    force_generator = ForceGenerator2(
+        grid_width,
+        grid_height,
+        0.03,
+        r_min =3.5e-2,
+        r_max =6.5e-2,
+        smoothness=1.2,
+        sphere_factor=1.2,
+        normal_peak=normal_peak,
+        shear_peak=shear_peak,
+    )
+
+    force_plot_path = output_dir / "force_plot.png"
+    save_force_plot(
+        force_generator=force_generator,
+        output_path=force_plot_path,
+        grid_width=grid_width,
+        grid_height=grid_height,
+    )
+    
+
+    fig, ax = plt.subplots(figsize=(10, 10))
+
+    F_list: list[np.ndarray] = []
+    M_list: list[np.ndarray] = []
+    meta: list[tuple[int, int, float, float, bool]] = []
+
+    force_matrix_rows: list[list[float]] = []
+    y_force_rows: list[list[float]] = []
+
+    triangle_id = 0
+
+    for i in range(tris.n_x):
+        for j in range(tris.n_y):
+            center_x, center_y = tris.get_triangle_center(i, j)
+            v_x, v_y = tris.get_triangle_vertices(i, j)
+
+            # ForceGenerator2 returns:
+            # normal_density  -> Fz density
+            # shear_x_density -> Fx density
+            # shear_y_density -> Fy density
+            normal_density, shear_x_density, shear_y_density = force_generator(v_x, v_y)
+
+            # Vertex force vectors in solver convention:
+            # [Fx, Fy, Fz] = [shear_x, shear_y, normal]
+            vertex_forces = np.stack(
+                [
+                    shear_x_density,
+                    shear_y_density,
+                    normal_density,
+                ],
+                axis=-1,
+            )
+
+            # Convert density-like values to actual force per vertex.
+            # Division by 3 distributes the triangle area over the 3 vertices.
+            vertex_forces = vertex_forces / 3.0
+            vertex_forces = vertex_forces * physical_triangle_area
+
+            F_net, M_net = get_effective_force_moment_3d(
+                center_x,
+                center_y,
+                v_x,
+                v_y,
+                vertex_forces,
+            )
+
+            flip = ((i + j) % 2 == 0)
+
+            F_list.append(F_net)
+            M_list.append(M_net)
+            meta.append((i, j, center_x, center_y, flip))
+
+            # Dataset target convention:
+            # [normal_force, shear_force_x, shear_force_y]
+            actual_normal = float(F_net[2])
+            actual_shear_x = float(F_net[0])
+            actual_shear_y = float(F_net[1])
+
+            y_force_rows.append(
+                [
+                    actual_normal,
+                    actual_shear_x,
+                    actual_shear_y,
+                ]
+            )
+
+            # Diagnostic force matrix.
+            force_matrix_rows.append(
+                [
+                    float(triangle_id),
+                    float(i),
+                    float(j),
+                    float(center_x),
+                    float(center_y),
+                    float(np.mean(normal_density)),
+                    float(np.mean(shear_x_density)),
+                    float(np.mean(shear_y_density)),
+                    actual_normal,
+                    actual_shear_x,
+                    actual_shear_y,
+                    float(M_net[0]),
+                    float(M_net[1]),
+                    float(M_net[2]),
+                ]
+            )
+
+            triangle_id += 1
+
+    F_batch = jnp.array(F_list)
+    M_batch = jnp.array(M_list)
+    flips = jnp.array([m[4] for m in meta], dtype=bool)
+
+    c1s, c2s, c3s = batched_solve(F_batch, M_batch, flips)
+
+    corners_flat: list[list[np.ndarray]] = []
+
+    for idx, (i, j, center_x, center_y, _flip) in enumerate(
+        tqdm.tqdm(meta, desc="Generating deformed triangles")
+    ):
+        original_center = np.array([center_x, center_y, 0.0], dtype=float)
+
+        c1 = np.array(c1s[idx], dtype=float) + original_center
+        c2 = np.array(c2s[idx], dtype=float) + original_center
+        c3 = np.array(c3s[idx], dtype=float) + original_center
+
+        ax.fill(
+            [c1[0], c2[0], c3[0]],
+            [c1[1], c2[1], c3[1]],
+            color="turquoise",
+        )
+
+        corners_flat.append([c1, c2, c3])
+
+    corners_array = np.array(corners_flat, dtype=float).reshape(
+        tris.n_x,
+        tris.n_y,
+        3,
+        3,
+    )
+
+    force_matrix_full = np.array(force_matrix_rows, dtype=np.float64)
+    y_forces = np.array(y_force_rows, dtype=np.float64)
+
+    deformed_centers = corners_array[:, :, :, :2].mean(axis=2)
+
+    reference_centers = np.zeros_like(deformed_centers)
+
+    for i in range(tris.n_x):
+        for j in range(tris.n_y):
+            reference_centers[i, j] = np.array(tris.get_triangle_center(i, j))
+
+    displacements = deformed_centers - reference_centers
+    disp_mag = np.linalg.norm(displacements, axis=2)
+
+    print("Deformation displacement diagnostics")
+    print("------------------------------------")
+    print(f"Mean displacement: {np.mean(disp_mag):.6e} m")
+    print(f"Max displacement:  {np.max(disp_mag):.6e} m")
+    print(f"Physical triangle radius: {physical_triangle_radius:.6e} m")
+    print(f"Grid cell radius:         {grid_cell_radius:.6e} m")
+    print(f"Max allowed corner displacement: {max_allowed_corner_displacement:.6e} m")
+
+    x_min = 0.0
+    x_max = grid_width
+    y_min = 0.0
+    y_max = grid_height
+
+    grid_plot_width = grid_width
+    marker_size = grid_plot_width * 0.12
+    margin = marker_size * 0.45
+
+    place_marker(
+        ax,
+        marker_paths[0],
+        center_x=(x_min + x_max) / 2,
+        center_y=y_max + margin + marker_size / 2,
+        size=marker_size,
+    )
+
+    place_marker(
+        ax,
+        marker_paths[1],
+        center_x=x_min - margin - marker_size / 2,
+        center_y=(y_min + y_max) / 2,
+        size=marker_size,
+    )
+
+    place_marker(
+        ax,
+        marker_paths[2],
+        center_x=x_max + margin + marker_size / 2,
+        center_y=(y_min + y_max) / 2,
+        size=marker_size,
+    )
+
+    plot_margin = marker_size * 2.5
+    plot_x_min = x_min - plot_margin
+    plot_x_max = x_max + plot_margin
+    plot_y_min = y_min - plot_margin
+    plot_y_max = y_max + plot_margin
+
+    ax.set_xlim(plot_x_min, plot_x_max)
+    ax.set_ylim(plot_y_min, plot_y_max)
+    ax.set_aspect("equal", adjustable="box")
+    ax.axis("off")
+
+    deformed_image_path = output_dir / "deformed_with_aruco.png"
+    corners_path = output_dir / "deformed_corners.npy"
+    force_matrix_path = output_dir / "force_matrix_full.npy"
+    y_forces_path = output_dir / "y_forces.npy"
+    metadata_path = output_dir / "deformation_metadata.json"
+
+    fig.savefig(deformed_image_path, dpi=dpi, pad_inches=0)
+
+    if show_plot:
+        plt.show()
+
+    plt.close(fig)
+
+    np.save(corners_path, corners_array)
+    np.save(force_matrix_path, force_matrix_full)
+    np.save(y_forces_path, y_forces)
+
+    metadata = {
+        "grid_width": grid_width,
+        "grid_height": grid_height,
+        "n_x": int(tris.n_x),
+        "n_y": int(tris.n_y),
+        "n_triangles": int(tris.n_x * tris.n_y),
+        "grid_cell_area": float(grid_cell_area),
+        "physical_triangle_area": float(physical_triangle_area),
+        "marker_ids": marker_ids,
+        "normal_peak": float(normal_peak),
+        "force_scaling_method": "vertex_forces_area_divided_by_3",
+        "shear_peak": float(shear_peak),
+        "max_allowed_corner_displacement": float(max_allowed_corner_displacement),
+        "deformed_image": str(deformed_image_path),
+        "deformed_corners": str(corners_path),
+        "force_matrix_full": str(force_matrix_path),
+        "y_forces": str(y_forces_path),
+        "force_plot": str(force_plot_path),
+        "force_matrix_full_columns": [
+            "triangle_id",
+            "i",
+            "j",
+            "center_x",
+            "center_y",
+            "normal_density_mean",
+            "shear_x_density_mean",
+            "shear_y_density_mean",
+            "normal_force",
+            "shear_force_x",
+            "shear_force_y",
+            "moment_x",
+            "moment_y",
+            "moment_z",
+        ],
+        "y_forces_columns": [
+            "normal_force",
+            "shear_force_x",
+            "shear_force_y",
+        ],
+    }
+
+    with open(metadata_path, "w", encoding="utf-8") as f:
+        json.dump(metadata, f, indent=4)
+
+    print(f"Saved deformed image: {deformed_image_path}")
+    print(f"Saved deformed corners: {corners_path}")
+    print(f"Saved full force matrix: {force_matrix_path}")
+    print(f"Saved PyTorch target matrix: {y_forces_path}")
+    print(f"Saved force plot: {force_plot_path}")
+    print(f"Saved metadata: {metadata_path}")
+
+    return {
+        "deformed_image_path": deformed_image_path,
+        "corners_path": corners_path,
+        "force_matrix_path": force_matrix_path,
+        "y_forces_path": y_forces_path,
+        "force_plot_path": force_plot_path,
+        "metadata_path": metadata_path,
+        "corners": corners_array,
+        "force_matrix_full": force_matrix_full,
+        "y_forces": y_forces,
+        "metadata": metadata,
+    }
+if __name__ == "__main__":
+
+    generate_deformation_sample(show_plot=True)
